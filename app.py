@@ -1,328 +1,170 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-import random
+import plotly.express as px
+import plotly.graph_objects as go
 import time
-import hashlib
-from datetime import datetime, date, timedelta
+from datetime import datetime
 
-# ==============================================================================
-# 1. SETUP & CONFIGURATION
-# ==============================================================================
+# --- إعدادات الصفحة المتقدمة ---
 st.set_page_config(
-    page_title="صحصح يا نشمي | التطبيق الرسمي",
-    page_icon="🇯🇴",
+    page_title="الموسوعة الذكية للمعلوماتية الصحية",
+    page_icon="🏥",
     layout="wide",
-    initial_sidebar_state="collapsed" # نبدأ مغلقين للتركيز على الدخول
+    initial_sidebar_state="expanded"
 )
 
-# ==============================================================================
-# 2. DATABASE MANAGEMENT (The Backend)
-# ==============================================================================
-# لضمان أن التطبيق "Production Ready"، نستخدم SQLite
-# هذه الدوال تدير الاتصال وقراءة/كتابة البيانات
-
-def init_db():
-    """إنشاء الجداول إذا لم تكن موجودة"""
-    conn = sqlite3.connect('nashmi.db')
-    c = conn.cursor()
-    
-    # جدول المستخدمين
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (username TEXT PRIMARY KEY, password TEXT, join_date TEXT)''')
-    
-    # جدول السجلات اليومية
-    c.execute('''CREATE TABLE IF NOT EXISTS daily_logs
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  username TEXT, date TEXT, water INTEGER, sleep INTEGER, 
-                  steps INTEGER, mood TEXT, xp_gained INTEGER)''')
-    
-    # جدول تقدم المستخدم (Gamification)
-    c.execute('''CREATE TABLE IF NOT EXISTS user_stats
-                 (username TEXT PRIMARY KEY, total_xp INTEGER, level TEXT, streak INTEGER, last_active TEXT)''')
-    
-    conn.commit()
-    conn.close()
-
-def make_hashes(password):
-    return hashlib.sha256(str.encode(password)).hexdigest()
-
-def check_hashes(password, hashed_text):
-    if make_hashes(password) == hashed_text:
-        return hashed_text
-    return False
-
-def add_user(username, password):
-    conn = sqlite3.connect('nashmi.db')
-    c = conn.cursor()
-    c.execute('SELECT * FROM users WHERE username =?', (username,))
-    if c.fetchone():
-        conn.close()
-        return False # User exists
-    
-    c.execute('INSERT INTO users(username, password, join_date) VALUES (?,?,?)', 
-              (username, make_hashes(password), str(date.today())))
-    c.execute('INSERT INTO user_stats(username, total_xp, level, streak, last_active) VALUES (?,?,?,?,?)', 
-              (username, 0, "نشمي مبتدئ 👶", 0, str(date.today())))
-    conn.commit()
-    conn.close()
-    return True
-
-def login_user(username, password):
-    conn = sqlite3.connect('nashmi.db')
-    c = conn.cursor()
-    c.execute('SELECT * FROM users WHERE username =? AND password =?', (username, make_hashes(password)))
-    data = c.fetchall()
-    conn.close()
-    return data
-
-def save_log(username, water, sleep, steps, mood, xp):
-    conn = sqlite3.connect('nashmi.db')
-    c = conn.cursor()
-    today = str(date.today())
-    
-    # Check if already logged today
-    c.execute('SELECT * FROM daily_logs WHERE username =? AND date =?', (username, today))
-    if c.fetchone():
-        conn.close()
-        return False # Already logged
-        
-    c.execute('INSERT INTO daily_logs(username, date, water, sleep, steps, mood, xp_gained) VALUES (?,?,?,?,?,?,?)',
-              (username, today, water, sleep, steps, mood, xp))
-    
-    # Update Stats
-    c.execute('SELECT total_xp, streak, last_active FROM user_stats WHERE username=?', (username,))
-    stats = c.fetchone()
-    current_xp = stats[0] + xp
-    last_active = datetime.strptime(stats[2], "%Y-%m-%d").date()
-    current_streak = stats[1]
-    
-    # Streak Logic
-    if last_active == date.today() - timedelta(days=1):
-        current_streak += 1
-    elif last_active < date.today() - timedelta(days=1):
-        current_streak = 1 # Reset if missed a day
-        
-    # Level Logic
-    new_level = get_level_title(current_xp)
-    
-    c.execute('UPDATE user_stats SET total_xp=?, level=?, streak=?, last_active=? WHERE username=?', 
-              (current_xp, new_level, current_streak, today, username))
-    
-    conn.commit()
-    conn.close()
-    return True
-
-def get_user_data(username):
-    conn = sqlite3.connect('nashmi.db')
-    c = conn.cursor()
-    c.execute('SELECT * FROM user_stats WHERE username=?', (username,))
-    stats = c.fetchone()
-    
-    c.execute('SELECT water, sleep FROM daily_logs WHERE username=? ORDER BY date DESC LIMIT 7', (username,))
-    logs = c.fetchall()
-    conn.close()
-    return stats, logs
-
-def get_leaderboard():
-    conn = sqlite3.connect('nashmi.db')
-    df = pd.read_sql_query("SELECT username, total_xp, level, streak FROM user_stats ORDER BY total_xp DESC LIMIT 5", conn)
-    conn.close()
-    return df
-
-# ==============================================================================
-# 3. HELPER FUNCTIONS & CONTENT
-# ==============================================================================
-
-def get_level_title(xp):
-    if xp >= 1000: return "نشمي أسطورة 👑"
-    if xp >= 600: return "نشمي محترف 🔥"
-    if xp >= 300: return "نشمي متوازن ⚖️"
-    if xp >= 100: return "نشمي نشيط 🏃‍♂️"
-    return "نشمي مبتدئ 👶"
-
-def get_personality_msg(water, sleep):
-    if water < 4 or sleep < 5:
-        return "random_scold", "وضعك ما بيبشر.. الجسم ناشف والنوم قليل! 🌵"
-    elif water >= 8 and sleep >= 7:
-        return "random_praise", "يا هيك النشاط يا بلاش! استمر 💪"
-    else:
-        return "random_neutral", "بداية جيدة، بس لسا في مجال للتحسن 👌"
-
-# تهيئة قاعدة البيانات عند بدء التشغيل
-init_db()
-
-# ==============================================================================
-# 4. CUSTOM CSS (PRODUCTION UI)
-# ==============================================================================
+# --- نظام التصميم (CSS) ---
 st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;500;800&display=swap');
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Cairo', sans-serif; text-align: right; }
+    .main-header { background: linear-gradient(90deg, #073b4c, #118ab2); padding: 20px; border-radius: 15px; color: white; text-align: center; margin-bottom: 25px; }
+    .info-card { background-color: #f8f9fa; border-right: 5px solid #06d6a0; padding: 20px; border-radius: 10px; margin: 10px 0; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); }
+    .ai-box { background-color: #000; color: #39ff14; padding: 15px; border-radius: 10px; font-family: 'Courier New', monospace; border: 1px solid #39ff14; }
+    .stProgress > div > div > div > div { background-color: #06d6a0; }
+    </style>
+    """, unsafe_allow_html=True)
 
-body, .stApp {
-    background-color: #F8F9FA;
-    font-family: 'Tajawal', sans-serif !important;
-}
+# --- القائمة الجانبية للتنقل ---
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/3304/3304567.png", width=100)
+    st.title("البوابة الصحية الذكية")
+    menu = st.radio(
+        "انتقل بين المحطات:",
+        ["🏠 الشاشة الرئيسية", "📊 مختبر البيانات (Data Lab)", "🤖 مدرسة الـ AI الطبي", "🏥 السجلات الإلكترونية (EHR)", "🔮 مستقبل الطب", "🏁 اختبر معلوماتك"]
+    )
+    st.divider()
+    st.info("💡 **نصيحة نشمي:** المعلوماتية الصحية مش بس تكنولوجيا، هي " + "أمانة ومسؤولية للحفاظ على أرواح الناس.")
 
-/* Hide Streamlit Branding */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
-
-/* Custom Cards */
-.css-card {
-    background: #FFFFFF;
-    padding: 20px;
-    border-radius: 15px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-    margin-bottom: 15px;
-    border: 1px solid #EAEAEA;
-}
-
-/* Metric Boxes */
-.metric-box {
-    text-align: center;
-    padding: 10px;
-    background: linear-gradient(45deg, #0B6E4F, #2ecc71);
-    color: white;
-    border-radius: 12px;
-}
-
-/* Custom Input Fields */
-div[data-baseweb="input"] > div {
-    border-radius: 10px;
-    background-color: #FFFFFF;
-}
-
-/* Buttons */
-.stButton > button {
-    width: 100%;
-    border-radius: 12px;
-    height: 50px;
-    font-weight: bold;
-    background-color: #CE1126;
-    color: white;
-    border: none;
-}
-.stButton > button:hover {
-    background-color: #a80e1f;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ==============================================================================
-# 5. APPLICATION FLOW
-# ==============================================================================
-
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.username = ''
-
-# --- AUTHENTICATION PAGE ---
-if not st.session_state.logged_in:
-    col1, col2, col3 = st.columns([1,2,1])
+# --- المحطة 1: الشاشة الرئيسية ---
+if menu == "🏠 الشاشة الرئيسية":
+    st.markdown("<div class='main-header'><h1>المركز الأردني لعلوم المعلوماتية الصحية والذكاء الاصطناعي</h1></div>", unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.subheader("مرحباً بك يا نشمي في رحلة المستقبل!")
+        st.write("""
+        هاد التطبيق هو دليلك الشامل عشان تفهم كيف بنحول "الأرقام والبيانات" لـ "أرواح بتتعافى". 
+        المعلوماتية الصحية (Health Informatics) هي المحرك اللي بخلي المستشفيات تشتغل بذكاء مش بس بجهد.
+        """)
+        st.image("https://images.unsplash.com/photo-1576091160550-2173dba999ef?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80", use_container_width=True)
+    
     with col2:
-        st.markdown("<div style='text-align: center; margin-top: 50px;'>", unsafe_allow_html=True)
-        st.image("https://cdn-icons-png.flaticon.com/512/2620/2620499.png", width=100)
-        st.title("صحصح يا نشمي 🇯🇴")
-        st.write("سجل دخولك عشان نحفظ تقدمك وما يضيع تعبك")
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        tab1, tab2 = st.tabs(["تسجيل دخول", "حساب جديد"])
-        
-        with tab1:
-            username = st.text_input("اسم المستخدم")
-            password = st.text_input("كلمة السر", type='password')
-            if st.button("دخول"):
-                if login_user(username, password):
-                    st.session_state.logged_in = True
-                    st.session_state.username = username
-                    st.rerun()
-                else:
-                    st.error("اسم المستخدم أو كلمة السر غلط")
+        st.markdown("### 🧬 ركائز التخصص")
+        st.success("1. النظم الخبيرة")
+        st.success("2. تحليل البيانات الضخمة")
+        st.success("3. أمن المعلومات الطبية")
+        st.success("4. واجهات التفاعل البشرية")
+        st.metric(label="دقة التشخيص بالـ AI", value="94%", delta="12% زيادة")
 
-        with tab2:
-            new_user = st.text_input("اختر اسم مستخدم")
-            new_pass = st.text_input("اختر كلمة سر", type='password')
-            if st.button("إنشاء حساب"):
-                if add_user(new_user, new_pass):
-                    st.success("تم إنشاء الحساب! هلا بيك.. سجل دخولك هسا")
-                else:
-                    st.warning("اسم المستخدم هذا محجوز لواحد ثاني")
-
-# --- MAIN DASHBOARD (AFTER LOGIN) ---
-else:
-    # Fetch Data
-    stats, logs = get_user_data(st.session_state.username)
-    current_xp = stats[1]
-    level_title = stats[2]
-    streak = stats[3]
+# --- المحطة 2: مختبر البيانات ---
+elif menu == "📊 مختبر البيانات (Data Lab)":
+    st.title("🧪 مختبر معالجة البيانات الصحية")
+    st.write("تعال نشوف كيف الـ Data بتفرق معانا بالتشخيص.")
     
-    # Sidebar
-    with st.sidebar:
-        st.title(f"هلا, {st.session_state.username}")
-        st.write(f"Level: **{level_title}**")
-        st.progress(min((current_xp % 1000) / 1000, 1.0))
-        st.write(f"مجموع النقاط: {current_xp}")
-        
-        st.markdown("---")
-        if st.button("تسجيل خروج"):
-            st.session_state.logged_in = False
-            st.rerun()
-
-    # Main Area
-    st.markdown(f"## ☀️ لوحة التحكم اليومية")
+    # محاكاة لبيانات ضغط الدم
+    st.subheader("محاكي بيانات المرضى (Real-time Stream)")
+    data_points = st.slider("حدد حجم العينة لتحليلها:", 50, 500, 100)
     
-    col_main, col_stats = st.columns([2, 1])
+    import numpy as np
+    chart_data = pd.DataFrame({
+        'نبض القلب': np.random.normal(75, 10, data_points),
+        'مستوى السكر': np.random.normal(120, 20, data_points),
+        'العمر': np.random.randint(20, 80, data_points)
+    })
     
-    with col_main:
-        # 1. Daily Input Section
-        st.markdown("<div class='css-card'>", unsafe_allow_html=True)
-        st.subheader("📝 سجل يومك")
-        
-        with st.form("daily_form"):
-            c1, c2 = st.columns(2)
-            water = c1.slider("💧 كاسات مي", 0, 15, 5)
-            sleep = c2.slider("😴 ساعات نوم", 0, 12, 7)
-            steps = st.number_input("👣 خطوات اليوم", 0, 30000, 3000, step=500)
-            mood = st.select_slider("كيف النفسية؟", ["تعبان", "ماشي الحال", "ممتازة"])
-            
-            submit = st.form_submit_button("اعتمد اليوم ✅")
-            
-            if submit:
-                # Calculate XP
-                xp_gain = 10 + (20 if water>=8 else 0) + (20 if sleep>=7 else 0) + (10 if steps>5000 else 0)
-                
-                if save_log(st.session_state.username, water, sleep, steps, mood, xp_gain):
-                    st.balloons()
-                    st.success(f"كفو! تم الحفظ وكسبت {xp_gain} نقطة")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.warning("سبق وسجلت دخولك لليوم.. ارجع بكرة يا بطل!")
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        # 2. Charts
-        if logs:
-            st.markdown("<div class='css-card'>", unsafe_allow_html=True)
-            st.subheader("📈 أدائك آخر أسبوع")
-            chart_data = pd.DataFrame(logs, columns=['Water', 'Sleep'])
-            st.area_chart(chart_data)
-            st.markdown("</div>", unsafe_allow_html=True)
+    fig = px.scatter(chart_data, x="نبض القلب", y="مستوى السكر", color="العمر", 
+                     title="العلاقة بين النبض والسكر حسب الفئة العمرية",
+                     color_continuous_scale=px.colors.sequential.Viridis)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("<div class='info-card'><b>تحليل المحقق:</b> لما نربط هاي البيانات ببعض، بنقدر نتوقع 'الجلطات' قبل ما تصير بـ 48 ساعة! هاد هو جوهر الهيلث انفورماتكس.</div>", unsafe_allow_html=True)
 
-    with col_stats:
-        # 1. Leaderboard (Social/Gamification)
-        st.markdown("<div class='css-card'>", unsafe_allow_html=True)
-        st.subheader("🏆 كبارية البلد (المتصدرين)")
-        leaderboard = get_leaderboard()
-        for index, row in leaderboard.iterrows():
-            st.write(f"**{index+1}. {row['username']}** - {row['level']}")
-            st.caption(f"XP: {row['total_xp']} | Streak: {row['streak']}🔥")
-            st.markdown("---")
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        # 2. Daily Tip
-        st.info("💡 نصيحة: الجو بالأردن بقلب فجأة، لا تطلع خفيف بالليل حتى لو الصبح شوب!")
+# --- المحطة 3: مدرسة الـ AI الطبي ---
+elif menu == "🤖 مدرسة الـ AI الطبي":
+    st.title("🧠 كيف بيفكر الذكاء الاصطناعي في المستشفى؟")
+    
+    st.write("الـ AI مش سحر، هو عبارة عن خوارزميات بتتعلم من الماضي.")
+    
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.subheader("1. الرؤية الحاسوبية (Computer Vision)")
+        st.write("القدرة على تحليل صور الأشعة بدقة خرافية.")
+        if st.button("شغل محاكي الأشعة"):
+            bar = st.progress(0)
+            for i in range(101):
+                time.sleep(0.01)
+                bar.progress(i)
+            st.image("https://upload.wikimedia.org/wikipedia/commons/b/b2/Normal_posteroanterior_chest_X-ray.jpg", width=300)
+            st.code("RESULT: NORMAL - Accuracy: 99.2%", language="python")
 
-    # Footer Logic
-    st.markdown("<br><hr><center style='color:gray'>صحصح يا نشمي v3.0 | Production Release</center>", unsafe_allow_html=True)
+    with col_b:
+        st.subheader("2. معالجة اللغات (NLP)")
+        st.write("كيف الجهاز بفهم كلام الدكتور المكتوب بخط إيد مش مفهوم!")
+        text_input = st.text_area("انسخ ملاحظات طبية هنا:", "Patient suffers from acute headaches and mild fever...")
+        if st.button("تحليل النص"):
+            st.write("🔍 **الكلمات المفتاحية المستخرجة:** الصداع، الحرارة.")
+            st.write("🎯 **التصنيف:** حالة التهابية.")
+
+# --- المحطة 4: السجلات الإلكترونية (EHR) ---
+elif menu == "🏥 السجلات الإلكترونية (EHR)":
+    st.title("📂 نظام السجلات الصحية الموحد")
+    
+    st.markdown("""
+    في الأردن، عنا نظام 'حكيم'. الهيلث انفورماتكس هي اللي بتخلي ملفك الطبي متاح في عمان وإربد والعقبة بنفس اللحظة.
+    """)
+    
+    with st.expander("🔐 أمن البيانات (Blockchain in Health)"):
+        st.write("البيانات مشفرة ومحمية بسلاسل الكتل لضمان عدم التلاعب.")
+        st.json({"block_id": 1024, "hash": "8f3e2...9a", "status": "Secure"})
+
+    # تجربة إضافة مريض
+    with st.form("Patient Entry"):
+        st.subheader("إضافة مريض جديد للنظام")
+        p_name = st.text_input("اسم المريض")
+        p_blood = st.selectbox("زمرة الدم", ["A+", "B+", "O+", "AB+", "A-", "B-", "O-", "AB-"])
+        p_history = st.multiselect("تاريخ أمراض", ["سكري", "ضغط", "حساسية بنسلين", "ربو"])
+        if st.form_submit_button("حفظ في قاعدة البيانات"):
+            st.success(f"تم تسجيل {p_name} بنجاح وتوزيع البيانات على الشبكة.")
+
+# --- المحطة 5: مستقبل الطب ---
+elif menu == "🔮 مستقبل الطب":
+    st.title("🚀 لوين رايحين؟")
+    
+    feat_col1, feat_col2, feat_col3 = st.columns(3)
+    
+    with feat_col1:
+        st.markdown("### الجراحة عن بُعد")
+        st.write("طبيب في أمريكا بجري عملية لمريض بالمدينة الطبية عن طريق الروبوت.")
+        st.image("https://cdn-icons-png.flaticon.com/512/387/387561.png", width=100)
+        
+    with feat_col2:
+        st.markdown("### النانو تكنولوجي")
+        st.write("روبوتات مجهرية بتدخل بالدم وبتحارب الخلايا السرطانية حبة حبة.")
+        st.image("https://cdn-icons-png.flaticon.com/512/2540/2540413.png", width=100)
+        
+    with feat_col3:
+        st.markdown("### الطباعة ثلاثية الأبعاد")
+        st.write("طباعة أعضاء بشرية (قلب، كلية) باستخدام خلايا المريض نفسه.")
+        st.image("https://cdn-icons-png.flaticon.com/512/2833/2833315.png", width=100)
+
+# --- المحطة 6: الاختبار ---
+elif menu == "🏁 اختبر معلوماتك":
+    st.title("📝 تحدي النشامى في المعلوماتية")
+    st.write("خلينا نشوف شو تعلمت اليوم!")
+    
+    q1 = st.radio("1. شو الهدف الأساسي من الهيلث انفورماتكس؟", ["توفير الحبر والورق", "تحسين جودة الرعاية بالبيانات", "تصليح أجهزة المستشفى"])
+    if st.button("تأكد من إجابتي"):
+        if q1 == "تحسين جودة الرعاية بالبيانات":
+            st.balloons()
+            st.success("وحش! إجابة صحيحة.")
+        else:
+            st.error("للأسف غلط، ركز يا نشمي!")
+
+# --- التذييل (Footer) ---
+st.divider()
+footer_col1, footer_col2 = st.columns(2)
+with footer_col1:
+    st.write("© 2025 - جميع الحقوق محفوظة لمحبي الهيلث انفورماتكس")
+with footer_col2:
+    st.write("تم التطوير باستخدام Streamlit & AI 🇯🇴")
