@@ -1,16 +1,24 @@
 import streamlit as st
 import random
+from datetime import datetime, date
 
-# -------------------- Page Config --------------------
+# ==================================================
+# PAGE CONFIG
+# ==================================================
 st.set_page_config(
-    page_title="صحصح يا نشمي",
+    page_title="صحصح يا نشمي 🇯🇴",
     page_icon="🇯🇴",
     layout="wide"
 )
 
-# -------------------- CSS Styling --------------------
+# ==================================================
+# GLOBAL STYLE (COLORS + UI)
+# ==================================================
 st.markdown("""
 <style>
+body {
+    background-color: #F7F5F2;
+}
 .stButton>button {
     width: 100%;
     border-radius: 20px;
@@ -19,117 +27,184 @@ st.markdown("""
     font-weight: bold;
     font-size: 16px;
 }
-.metric-box {
-    padding: 15px;
-    border-radius: 15px;
-    background-color: #ffffff;
-    box-shadow: 0px 4px 10px rgba(0,0,0,0.05);
-    margin-bottom: 15px;
+.card {
+    background-color: white;
+    padding: 20px;
+    border-radius: 20px;
+    box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+    margin-bottom: 20px;
+}
+.title {
+    text-align:center;
+    color:#0B6E4F;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------- Header --------------------
+# ==================================================
+# SESSION STATE (MEMORY)
+# ==================================================
+if "profile" not in st.session_state:
+    st.session_state.profile = {
+        "name": "نشمي",
+        "streak": 0,
+        "last_visit": None,
+        "level": "نشمي مبتدئ"
+    }
+
+# ==================================================
+# HELPER FUNCTIONS
+# ==================================================
+def update_streak():
+    today = date.today()
+    last = st.session_state.profile["last_visit"]
+
+    if last is None:
+        st.session_state.profile["streak"] = 1
+    else:
+        diff = (today - last).days
+        if diff == 1:
+            st.session_state.profile["streak"] += 1
+        elif diff > 1:
+            st.session_state.profile["streak"] = 1
+
+    st.session_state.profile["last_visit"] = today
+
+
+def get_level(streak):
+    if streak >= 10:
+        return "نشمي أسطورة 💪"
+    elif streak >= 5:
+        return "نشمي متوازن 👌"
+    else:
+        return "نشمي على الطريق"
+
+
+def choose_personality(water, sleep):
+    if water < 4 and sleep < 5:
+        return "sarcastic"
+    elif water >= 8 and sleep >= 7:
+        return "supportive"
+    else:
+        return "normal"
+
+
+def personality_message(mode):
+    messages = {
+        "sarcastic": [
+            "واضح الجسم عطشان والنوم زعلان 😏",
+            "هيك بدنا نصير؟ كاسة مي مش غلط 💧"
+        ],
+        "supportive": [
+            "كفو! جسمك مبسوط منك 👏",
+            "هيك النشامى الصح 💪"
+        ],
+        "normal": [
+            "أمورك ماشية، بس في مجال نتحسن 👌"
+        ]
+    }
+    return random.choice(messages[mode])
+
+
+def daily_surprise():
+    return random.choice([
+        "👵 وصفة ستّي: بابونج ونام بكير",
+        "🔥 تحدي اليوم: اعمل 10 ضغط",
+        "💧 اشرب كاسة مي هسا",
+        "😏 نصيحة صريحة: صحتك أهم من كل شي"
+    ])
+
+
+def honest_feedback(water, sleep):
+    if water < 5:
+        return "الصراحة؟ جسمك ناشف اليوم 💧"
+    if sleep < 6:
+        return "واضح إنك محتاج نوم 😴"
+    return "أمورك ممتازة، كمل هيك 👌"
+
+
+def predict_energy(water, sleep):
+    score = water * 6 + sleep * 10
+    return min(score, 100)
+
+# ==================================================
+# HEADER
+# ==================================================
+st.markdown("<h1 class='title'>🇯🇴 صحصح يا نشمي</h1>", unsafe_allow_html=True)
 st.markdown(
-    "<h1 style='text-align:center; color:#007A3D;'>🇯🇴 صحصح يا نشمي</h1>",
-    unsafe_allow_html=True
-)
-st.markdown(
-    "<p style='text-align:center;'>مستشارك الصحي بلهجة أردنية.. خفيف، ذكي، وبفيدك</p>",
+    "<p style='text-align:center;'>رفيقك الصحي اليومي.. بحكي معك وبتذكّرك بنفسك</p>",
     unsafe_allow_html=True
 )
 
 st.divider()
 
-# -------------------- Sidebar --------------------
+# ==================================================
+# SIDEBAR (USER INPUT)
+# ==================================================
 with st.sidebar:
-    st.header("👤 ملفك الصحي")
+    st.header("👤 ملفك")
 
-    name = st.text_input("شو الاسم الكريم؟", "يا نشمي")
+    name = st.text_input("اسمك", st.session_state.profile["name"])
+    water = st.slider("كم كاسة مي شربت؟ 💧", 0, 15, 5)
+    sleep = st.slider("كم ساعة نمت؟ 😴", 0, 12, 7)
 
-    st.divider()
-    st.header("📊 وضعك اليوم")
+    st.session_state.profile["name"] = name
 
-    water = st.select_slider(
-        "كم كاسة مي شربت؟ 💧",
-        options=list(range(0, 16)),
-        value=5
-    )
+# ==================================================
+# UPDATE MEMORY
+# ==================================================
+update_streak()
+st.session_state.profile["level"] = get_level(st.session_state.profile["streak"])
 
-    mansaf = st.radio(
-        "ضارب منسف اليوم؟ 🍖",
-        ["لأ، أموري تمام", "آه والله، وعليها سمنة بلقاوية"]
-    )
-
-    sleep = st.slider(
-        "كم ساعة نمت؟ 😴",
-        0, 12, 7
-    )
-
-# -------------------- Main Analysis --------------------
+# ==================================================
+# MAIN CONTENT
+# ==================================================
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader(f"🔍 التقييم الصحي – {name}")
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader(f"👋 أهلاً {name}")
 
-    if water < 6:
-        st.error("💧 شرب المي عندك قليل، الجسم بده ترطيب. اشرب كاستين هسا!")
-    elif water >= 8:
-        st.success("✅ كفو! شربك للمي ممتاز")
+    st.write(f"🏆 مستواك: **{st.session_state.profile['level']}**")
+    st.write(f"🔥 أيام متتالية: **{st.session_state.profile['streak']}**")
 
-    if sleep < 6:
-        st.warning("😴 نومك قليل، حاول ترتاح أو تاخذ غفوة")
-    else:
-        st.success("🛌 نومك ممتاز اليوم")
-
-    if mansaf == "آه والله، وعليها سمنة بلقاوية":
-        st.info(
-            "🍽️ المنسف عز، بس توقّع خمول. مشي خفيف أو شاي ميرامية بفرق"
-        )
+    personality = choose_personality(water, sleep)
+    st.info(personality_message(personality))
 
     st.markdown("---")
+    st.subheader("🎁 مفاجأة اليوم")
+    st.success(daily_surprise())
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # -------------------- Grandma Remedy --------------------
-    st.subheader("👵 وصفة ستّي")
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("🗣️ بدك الصراحة؟")
+    if st.button("احكيلي الصراحة"):
+        st.warning(honest_feedback(water, sleep))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    recipes = {
-        "زيادة التركيز 🧠": "جوز ولوز نيّ + معلقة عسل بلدي على الريق",
-        "رشح أو لفحة 🤧": "زهورات أو ميرامية سخنة مع ليمون",
-        "وجع بطن 🤢": "نعنع مغلي وراحة",
-        "توتر وقلق 😖": "بابونج قبل النوم وابعد عن التلفون"
-    }
-
-    choice = st.selectbox("شو المشكلة؟", list(recipes.keys()))
-    st.success(f"**النصيحة:** {recipes[choice]}")
-
-# -------------------- Quick Challenge --------------------
 with col2:
-    st.subheader("⏱️ تحدي 100 ثانية")
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("⚡ طاقتك اليوم")
 
+    energy = predict_energy(water, sleep)
+    st.metric("Energy Level", f"{energy}%")
+
+    st.progress(energy / 100)
+
+    st.markdown("---")
+    st.subheader("⏱️ تحدي سريع")
     if st.button("🔥 أعطيني تحدي"):
-        challenges = [
-            "اعمل 10 ضغط واعتبرهم صدقة عن صحتك 💪",
-            "امشي دورتين بالبيت وخذ نفس عميق 🌬️",
-            "اشرب كاسة مي دفعة وحدة 💧",
-            "افرد ظهرك وعدّل جلستك 🧍‍♂️"
-        ]
-        st.info(random.choice(challenges))
+        st.info(random.choice([
+            "قوم تمشى دقيقتين 🚶",
+            "اشرب مي دفعة وحدة 💧",
+            "افرد ظهرك وعدل جلستك 🧍"
+        ]))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# -------------------- Energy Chart --------------------
+# ==================================================
+# FOOTER
+# ==================================================
 st.divider()
-st.subheader("📈 مستوى طاقتك اليوم")
-
-energy_level = (
-    [30, 60, 90, 100, 70, 50, 40]
-    if mansaf != "آه والله، وعليها سمنة بلقاوية"
-    else [30, 50, 80, 30, 20, 25, 35]
-)
-
-st.line_chart(energy_level)
-st.caption("الهبوط المفاجئ = غيبوبة المنسف 😂")
-
-# -------------------- Footer --------------------
-st.markdown("---")
 st.markdown(
     "<p style='text-align:center;'>دير بالك على صحتك.. النشمي القوي بعرف يهتم بحاله 🇯🇴</p>",
     unsafe_allow_html=True
